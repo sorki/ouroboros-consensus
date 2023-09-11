@@ -53,6 +53,7 @@ module Ouroboros.Consensus.Storage.LedgerDB.Update (
   , UpdateLedgerDbTraceEvent (..)
   ) where
 
+import qualified Debug.Trace as DT
 import           Control.Monad.Except hiding (ap)
 import           Control.Monad.Reader hiding (ap)
 import           Data.Functor.Identity
@@ -112,17 +113,27 @@ toRealPoint (Weaken ap)      = toRealPoint ap
 -- | Apply block to the current ledger state
 --
 -- We take in the entire 'LedgerDB' because we record that as part of errors.
-applyBlock :: forall m c l blk. (ApplyBlock l blk, Monad m, c)
-           => LedgerCfg l
+applyBlock' :: forall m c l blk. (ApplyBlock l blk, Monad m, c)
+           => ([AuxLedgerEvent l] -> m ())
+           -> LedgerCfg l
            -> Ap m l blk c
-           -> LedgerDB l -> m l
-applyBlock cfg ap db = case ap of
-    ReapplyVal b ->
-      return $
-        tickThenReapply cfg b l
-    ApplyVal b ->
-      either (throwLedgerError db (blockRealPoint b)) return $ runExcept $
-        tickThenApply cfg b l
+           -> LedgerDB l
+           -> m l
+applyBlock' processEvents cfg ap db =
+  case ap of
+    ReapplyVal b -> do
+      let lr = tickThenReapplyLedgerResult cfg b l
+      DT.traceM $ "XXX: Block:" ++ (show $ blockSlot b)
+      DT.traceM $ "XXX: lrEventsReapply:" ++ (show $ length $ lrEvents lr)
+      return (lrResult lr)
+    ApplyVal b -> do
+      xlr <- either (throwLedgerError db (blockRealPoint b)) return $ runExcept $ do
+        lr <- tickThenApplyLedgerResult cfg b l
+        DT.traceM $ "XXX: Block:" ++ (show $ blockSlot b)
+        DT.traceM $ "XXX: lrEventsApply:" ++ (show $ length $ lrEvents lr)
+        pure (lr)
+      processEvents (lrEvents xlr)
+      pure (lrResult xlr)
     ReapplyRef r  -> do
       b <- doResolveBlock r
       return $
@@ -131,11 +142,19 @@ applyBlock cfg ap db = case ap of
       b <- doResolveBlock r
       either (throwLedgerError db r) return $ runExcept $
         tickThenApply cfg b l
-    Weaken ap' ->
-      applyBlock cfg ap' db
+    Weaken ap' -> do
+      applyBlock' processEvents cfg ap' db
   where
     l :: l
     l = ledgerDbCurrent db
+
+-- We take in the entire 'LedgerDB' because we record that as part of errors.
+applyBlock :: forall m c l blk. (ApplyBlock l blk, Monad m, c)
+           => LedgerCfg l
+           -> Ap m l blk c
+           -> LedgerDB l
+           -> m l
+applyBlock cfg ap db = applyBlock' (\x -> pure ()) cfg ap db
 
 {-------------------------------------------------------------------------------
   Resolving blocks maybe from disk
