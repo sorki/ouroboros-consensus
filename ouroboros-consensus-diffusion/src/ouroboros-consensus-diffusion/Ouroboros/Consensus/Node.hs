@@ -792,8 +792,8 @@ data StdRunNodeArgs m blk (p2p :: Diffusion.P2P) = StdRunNodeArgs
   , srnMaybeMempoolCapacityOverride :: Maybe MempoolCapacityBytesOverride
     -- ^ Determine whether to use the system default mempool capacity or explicitly set
     -- capacity of the mempool.
-  -- No good
-  --, srnEventHandler                 :: forall l . [AuxLedgerEvent l] -> m ()
+  -- WIP
+  , srnEventHandler                 :: [AuxLedgerEvent (LedgerState blk)] -> m ()
   }
 
 -- | Conveniently packaged 'LowLevelRunNodeArgs' arguments from a standard
